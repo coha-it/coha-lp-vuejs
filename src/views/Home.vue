@@ -1,11 +1,18 @@
 <template lang="pug">
 .home
   .page-sections(:style="{'transform': getPageTransform1(), 'transform': getPageTransform2(), 'transition-duration': getPageTransitionDuration()}")
-    section.page-section(v-for="(e, i) in new Array(iSections)" :key="i")
+    section.page-section(
+      v-for="(e, i) in new Array(iSections)"
+      :key="i"
+      v-on:mousewheel="handleScroll"
+      v-on:touchmove="handleTouch"
+    )
+
+      textarea(v-on:mousewheel.prevent="preventDefault")
       
       transition(name='fade')
         div(v-show='i != iSection')
-          | Seite nummer {{ i }}
+          | Flowting - Seite nummer {{ i }}
 
       transition(name='fade')
         div(v-show='i == iSection')
@@ -42,7 +49,7 @@ export default {
       iSection: 0,
       iSections: 10,
       iLastY: null,
-      iLastSpeed: 0,
+      iLastSpeedY: 0,
       iExtraScroll: 0,
       bIsScrolling: false,
 
@@ -50,24 +57,29 @@ export default {
       fLastTouchY: null,
       fLastTouchX: null,
       fTouchSensitivity: 8,
+      iTouchSpeedSensitivity: 20, // 15
 
       // Options
-      iScrollSensitivity: .5,
+      iScrollSensitivity: 4, // 0.5, but x-achis won't work
       iTransition: 750,
       iTransitionExtra: 0,
     }
   },
 
   created () {
-    window.addEventListener('touchmove', this.handleTouch);
-    window.addEventListener('wheel', this.handleScroll);
-    window.addEventListener('resize', this.handleResize);
+    // window.addEventListener('touchmove', this.handleTouch);
+    // window.addEventListener('mousewheel', this.handleScroll);
+    window.addEventListener('resize', this.handleWindowResize);
   },
 
   methods: {
 
-    naviClicked (key) {
+    preventDefault (e) {
+      console.log('preventDefault')
+      return e.preventDefault()
+    },
 
+    naviClicked (key) {
       if (this.iSection !== key) {
         let diff = Math.abs(this.iSection - key)
 
@@ -94,7 +106,7 @@ export default {
       }
     },
 
-    handleResize () {
+    handleWindowResize () {
       // Fix Viewports
       // First we get the viewport height and we multiple it by 1% to get a value for a vh unit
       // Then we set the value in the --vh custom property to the root of the document
@@ -102,28 +114,32 @@ export default {
     },
 
     handleTouch (event) {
-      var iPageY = event.touches[0].pageY
-      var iPageX = event.touches[0].pageX
+      var touches = event.touches
+      var iPageY = touches[0].pageY
+      var iPageX = touches[0].pageX
+      var fDiffX = Math.abs(this.fLastTouchX - iPageX)
 
       if (
-        this.fLastTouchY &&
-        !this.bIsScrolling &&
-        this.fLastTouchX &&
-        Math.abs(this.fLastTouchX - iPageX) < 2
+        this.fLastTouchY &&           // If there is a last Touch Y position
+        this.fLastTouchX &&           // If there is a last Touch X position
+        !this.bIsScrolling &&         // If it's not scrolling
+        fDiffX < 2 &&                  // If its the Y-Axis not much X-Axis
+        touches.length <= 1     // If only 1 Finger is Touching
       ) {
-        let diff = iPageY - this.fLastTouchY
-        let speed = Math.round(Math.abs(diff) / 15)
+        let fDiffY = iPageY - this.fLastTouchY
+        let speed = Math.round(Math.abs(fDiffY) / this.iTouchSpeedSensitivity)
+        speed = speed > 0 ? speed : 1
 
         this.iTransitionExtra = (speed - 1) * 500
 
         switch (true) {
-          case (diff < -(this.fTouchSensitivity)):
-            this.scrollDown(speed)
+          case (fDiffY > this.fTouchSensitivity) && !this.isOnFirstSection():
+            this.scrollUp(speed)
             this.bIsScrolling = true
             break
 
-          case (diff > this.fTouchSensitivity):
-            this.scrollUp(speed)
+          case (fDiffY < -(this.fTouchSensitivity)) && !this.isOnLastSection():
+            this.scrollDown(speed)
             this.bIsScrolling = true
             break
         }
@@ -140,29 +156,33 @@ export default {
     },
 
     handleScroll (event) {
-
       // Get last scrolled speed
-      if (this.iLastSpeed < Math.abs(event.deltaY)) {
-        this.iLastSpeed = Math.abs(event.deltaY)
+      let iSpeedY = Math.abs(event.deltaY)
+
+      if (this.iLastSpeedY < iSpeedY) {
+        this.iLastSpeedY = iSpeedY
       }
 
       // Only if mouse is wheeling Scrolling
       // And if it's not Scrolling
-      if (this.mouseIsWheeling(event) && !this.bIsScrolling)
-      {
-        this.scrollUpOrDown(event, 1);
+      if (
+        this.mouseIsWheeling(event) && // Mouse is Wheeling
+        !this.bIsScrolling &&          // Isn't Scrolling
+        this.scrollUpOrDown(event, 1)  // Not on First or Last Page
+      ) {
+        // Scrolling
         this.bIsScrolling = true
-
+        
         // Stopp scrolling after transition (*.75)
         setTimeout(() => {
           this.stoppedScrolling();
         }, this.iTransition * 0.75);
-
+        
         // Check if there is an extra-scroll
         setTimeout(() => {
           this.checkExtraScroll(event)
         }, this.iTransition * 0.9);
-
+        
         // Start Animation
         setTimeout(() => {
           this.startSectionAnimation()
@@ -176,13 +196,13 @@ export default {
 
     checkExtraScroll (event) {
       switch (true) {
-        case this.iLastSpeed > 300 && this.iExtraScroll < 2:
+        case this.iLastSpeedY > 300 && this.iExtraScroll < 2:
           this.iExtraScroll = 2
           this.iTransitionExtra += 200
           this.scrollUpOrDown(event, 2)
           break;
 
-        case this.iLastSpeed > 225 && this.iExtraScroll < 1:
+        case this.iLastSpeedY > 225 && this.iExtraScroll < 1:
           this.iExtraScroll = 2
           this.iTransitionExtra += 200
           this.scrollUpOrDown(event, 1)
@@ -192,7 +212,7 @@ export default {
 
     stoppedScrolling () {
       this.bIsScrolling = false
-      this.iLastSpeed = 0
+      this.iLastSpeedY = 0
       this.iExtraScroll = 0
       this.iTransitionExtra = 0
       this.fLastTouchY = null
@@ -203,14 +223,26 @@ export default {
       let iDeltaY = event.deltaY
       let iScrollSensitivity = this.iScrollSensitivity
       switch (true) {
-        case iDeltaY < -(iScrollSensitivity):
+        case iDeltaY < -(iScrollSensitivity) && !this.isOnFirstSection():
           this.scrollUp(amount)
-          break;
+          return true
 
-        case iDeltaY > iScrollSensitivity:
+        case iDeltaY > iScrollSensitivity && !this.isOnLastSection():
           this.scrollDown(amount)
-          break;
+          return true
+        
+        default:
+          // Can't Scroll
+          return false
       }
+    },
+
+    isOnFirstSection () {
+      return this.iSection === 0
+    },
+
+    isOnLastSection () {
+      return this.iSection +1 === this.iSections
     },
 
     scrollUp (amount = 1) {
@@ -311,21 +343,22 @@ html, body
 .page-pointer 
     display: inline-block;
     padding: 5px 10px
-    transition: 400ms;
     cursor: pointer
+    transform: scale(.75)
 
     &.active
       pointer-events: none
       cursor: default
+      transform: scale(1)
       .dot
-        padding: 5px
         opacity: .8
 
     .dot
+      transition: opacity 400ms
       opacity: .3
-      background: #000;
-      padding: 3px;
-      border-radius: 100%;
+      background: #000
+      padding: 5px
+      border-radius: 100%
 
 
 
